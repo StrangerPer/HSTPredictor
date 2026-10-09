@@ -167,7 +167,6 @@ class Gcn(nn.Module):
    
    
 class GTU(nn.Module):  
-# 用于创建多个不同步长的TCN，time_strides=1,多个不同的TCN之后通过cat操作，再通过FC转成T长度，就可以和原来的H进行残差操作了
     def __init__(self, in_channels, time_strides, kernel_size):
         super(GTU, self).__init__()
         self.in_channels = in_channels
@@ -181,29 +180,23 @@ class GTU(nn.Module):
         x_p = x_causal_conv[:, : self.in_channels, :, :]
         x_q = x_causal_conv[:, -self.in_channels:, :, :]
         x_gtu = torch.mul(self.tanh(x_p), self.sigmoid(x_q))
-        return x_gtu  # out--->B,D,N,(T-kernel_size+1)
+        return x_gtu 
         
 class MGTU(nn.Module):
     def __init__(self, c_dim, c_out, dropout, support_len, order, time_strides, kernel_size):
         super(MGTU, self).__init__()
-        # TCN参数
         self.tcn = GTU(c_dim, time_strides, kernel_size)
         
-        # 图卷积参数
         self.gcn = Gcn(c_dim, c_out, dropout, support_len, order)
         
     def forward(self, x, support):
         # x：B,T,N,D
-        
-        # 先进行时间卷积处理
         x_t = x.permute(0, 3, 2, 1)  # B,D,N,T
         
         x_t_out = self.tcn(x_t)  # B,D,N,(T-kernel_size+1)
 
-        # 空间卷积处理
         x_s_out = self.gcn(x_t_out, support)   # B,D,N,T
 
-        # 输出
         return x_s_out    
 
 class GRUCell(nn.Module):
@@ -215,14 +208,13 @@ class GRUCell(nn.Module):
         self.Liner2 = nn.Linear(self.hidden_dim * 2, self.hidden_dim)
 
     def forward(self, x, state):
-        # x: B, num_nodes, input_dim
-        # state: B, num_nodes, hidden_dim
+
         input_and_state = torch.cat((x, state), dim=-1)
-        z_r = self.Liner1(input_and_state)  # input_and_state @ self.Wz_r +self.bias_zr
+        z_r = self.Liner1(input_and_state)  
         z_r = torch.sigmoid(z_r)
         z, r = torch.split(z_r, self.hidden_dim, dim=-1)
         candidate = torch.cat((x, r * state), dim=-1)
-        hc = self.Liner2(candidate)  # candidate @ self.Wc +self.bias_c
+        hc = self.Liner2(candidate)  
         hc = torch.tanh(hc)
         h = z * state + (1 - z) * hc
         return h
@@ -232,9 +224,8 @@ class GRU(nn.Module):
         super(GRU, self).__init__()
         self.in_dim = in_dim
         self.out_dim = out_dim
-        # need to redefine
         dims_hyper = in_dim + out_dim
-        self.z = nn.Linear(dims_hyper, out_dim)    # 原来是3, 0.2, 0.2, 0.8, 0.8
+        self.z = nn.Linear(dims_hyper, out_dim)  
 
         self.r = nn.Linear(dims_hyper, out_dim)
 

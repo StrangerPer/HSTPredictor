@@ -14,18 +14,13 @@ class DataEncoding(nn.Module):
         super().__init__()
         assert activation in ['gelu', 'relu']
         in_units = in_dim * 2 if hasCross else in_dim
-        # in_units = (in_dim + 1) if hasCross else in_dim
         self.hasCross = hasCross
         self.linear1 = nn.Linear(in_units, hid_dim)
         self.activation = nn.GELU() if activation == 'gelu' else nn.ReLU()
         self.linear2 = nn.Linear(hid_dim, hid_dim)
 
     def forward(self, x, latestX):
-        if self.hasCross:
-            # feature = x[..., :1]
-            # anchor = latestX[..., :1]
-            # diff = feature - anchor
-            # data = torch.cat([x, diff], dim=-1)   
+        if self.hasCross: 
             data = torch.cat([x, x - latestX], dim=-1)   
         else:
             data = x
@@ -53,7 +48,7 @@ class time_wise_predictor(nn.Module):
             [nn.Linear(num_of_filters, pre_dim) for _ in range(predict_length)])
 
     def forward(self, data):
-        data = rearrange(data, 'b t n c -> b n (t c)')   # 它还是可以直接处理一个[B,N,D]类型的输入的
+        data = rearrange(data, 'b t n c -> b n (t c)') 
         data = self.predict_unit(data)
         need_concat = []
         B, N, _ = data.shape
@@ -173,9 +168,7 @@ class LRPred(nn.Module):
         self.transition_matrix = [torch.tensor(i, dtype=torch.float32) for i in transition_matrix]
         self.node_dim = node_dim
         self.use_mixed_proj = use_mixed_proj
-        # self.input_proj = nn.Linear(self.model_dim, self.model_dim)
         self.data_encoding = DataEncoding(input_dim, input_embedding_dim)
-        # 下面是嵌入模块
         if tod_embedding_dim > 0:
             self.tod_embedding = nn.Embedding(steps_per_day, tod_embedding_dim)
         if dow_embedding_dim > 0:
@@ -191,8 +184,7 @@ class LRPred(nn.Module):
             )
         self.temp_gate = TemporalContextGate(self.model_dim)
     
-        # 时空信息处理层，这个order是一个超参
-        self.mgtu1 = MGTU(self.model_dim, self.model_dim, 0.1, 3, 3, 1, 1)   # 动态图消融把第二个位置修改为2
+        self.mgtu1 = MGTU(self.model_dim, self.model_dim, 0.1, 3, 3, 1, 1) 
         self.mgtu3 = MGTU(self.model_dim, self.model_dim, 0.1, 3, 3, 1, 3)
         self.mgtu5 = MGTU(self.model_dim, self.model_dim, 0.1, 3, 3, 1, 5)
         self.mgtu7 = MGTU(self.model_dim, self.model_dim, 0.1, 3, 3, 1, 7)
@@ -202,26 +194,23 @@ class LRPred(nn.Module):
         )
         self.tmlp = TemporalResidualMLP(self.model_dim)
         self.gru = GRU(self.model_dim, self.model_dim)
-        # 注意力层
         self.attnST = nn.ModuleList(
             [
                 SelfAttentionLayer(self.model_dim, feed_forward_dim, self.num_heads)
                 for _ in range(self.num_layers)
             ]
         )
-        # 预测层
         self.time_wise_predictor = time_wise_predictor(
             self.num_nodes, self.in_steps, self.out_steps, self.model_dim, pre_dim=1,
             num_of_filters=self.node_dim, activation="gelu")
-            # PEMS03、BAY的D=256  其余为128
-        # 激活
+
         self.tanh = nn.Tanh()
         self.ln = nn.LayerNorm(self.model_dim)
         self.ln2 = nn.LayerNorm(self.model_dim)
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
-        # x: (batch_size, in_steps, num_nodes, input_dim+tod+dow=3)
+
         device = x.device
         batch_size = x.shape[0]
 
@@ -230,13 +219,9 @@ class LRPred(nn.Module):
         if self.dow_embedding_dim > 0:
             dow = x[..., 2]
         x = x[..., : self.input_dim]
-        # 保留最后一个位置数据
         x_last = x[:, -1:, :, :1].repeat([1, self.in_steps, 1, 1])
-        # 给每个时间步加上锚点，这里把时间信息也加进去了，不要可以删除到时候
-        # latestX = x[:, -1:, :, :].repeat([1, self.in_steps, 1, 1])
-        latestX = x.mean(dim=1, keepdim=True).repeat([1, self.in_steps, 1, 1])    # 均值作为锚点
+        latestX = x.mean(dim=1, keepdim=True).repeat([1, self.in_steps, 1, 1]) 
         x_ach = self.data_encoding(x, latestX)
-        # 添加嵌入信息
         features = [x_ach]
         if self.tod_embedding_dim > 0:
             tod_emb = self.tod_embedding(
@@ -260,15 +245,11 @@ class LRPred(nn.Module):
             features.append(adp_emb)
         x = torch.cat(features, dim=-1)  # (batch_size, in_steps, num_nodes, model_dim)
         
-        # 原始模块
-        x = self.temp_gate(x)   # 新增一行
-        # 计算动态邻居矩阵A_d-->N,N
+        x = self.temp_gate(x)  
         A_d = F.softmax(F.relu(self.tanh(self.node_emb @ self.node_emb.transpose(-2, -1))),dim=-1).to(device)
         self.transition_matrix = [adj_p.to(device) for adj_p in self.transition_matrix]
-        new_supports = self.transition_matrix + [A_d]    # 去除动态图
-        # 这里增加一个残差层，可选
+        new_supports = self.transition_matrix + [A_d]   
         res = x
-        # 时空依赖学习模块
         scale_fea = []
         out1 = self.mgtu1(x, new_supports)
         scale_fea.append(out1)
@@ -280,22 +261,20 @@ class LRPred(nn.Module):
         scale_fea.append(out7)
         scale_x = torch.cat(scale_fea, dim=-1)
         time_conv = self.fcmy(scale_x).permute(0, 3, 2, 1)   # B,D,N,T
-        # 和DSTAGNN保持一致
-        # time_conv_output = self.relu(time_conv).permute(0, 3, 2, 1)  # B,T,N,D
-        # 残差连接
-        time_conv = self.tmlp(time_conv)   # 后面增加的
-        out = self.ln(time_conv + res) # 消融去除原始信息流
-        # 增加一个GRU层看看效果
+
+        time_conv = self.tmlp(time_conv)   
+        out = self.ln(time_conv + res) 
+
         hidden = []
         ht = torch.zeros(batch_size, self.num_nodes, self.model_dim).to(device)
         for i in range(self.in_steps):
             ht = self.gru(out[:, i, :, :], ht)
             hidden.append(ht.unsqueeze(-1))   # B,N,D,T
         out = torch.cat(hidden, dim=-1).permute(0, 3, 1, 2)  # B,T,N,D
-        # 空间注意力层
-        for attn in self.attnST:  # 空间
+
+        for attn in self.attnST:  
             out = attn(out, dim=2, augment=True)   # B,T,N,D       
-        # 预测层
+
         main_output = self.time_wise_predictor(out)
         main_output += x_last
 
