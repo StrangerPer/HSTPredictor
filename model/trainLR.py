@@ -24,10 +24,8 @@ from lib.utils import (
 from model.utils.pltAST import plot_spatial_embedding_tsne, plot_temporal_correlation
 from model.utils.serialization import load_adj, load_matrix
 from lib.metrics import RMSE_MAE_MAPE
-from lib.data_prepareLR import get_dataloaders_from_index_data   # 分SD数据集用这个来划分数据
+from lib.data_prepareLR import get_dataloaders_from_index_data 
 from LR.ALTP import LRPred
-
-# ! X shape: (B, T, N, C)
 
 
 @torch.no_grad()
@@ -113,7 +111,7 @@ def train(
     log=None,
     save=None,
 ):
-    model = model.to(DEVICE)  # 将模型移动到 GPU
+    model = model.to(DEVICE) 
 
     wait = 0
     min_val_loss = np.inf
@@ -220,13 +218,12 @@ def test_model_new(model, dataloader, log=None):
 
     start = time.time()
 
-    # -------- 全局累计变量 --------
-    total_se = 0.0      # squared error
-    total_ae = 0.0      # absolute error
-    total_ape = 0.0     # absolute percentage error
-    total_count = 0     # 有效元素个数（用于 RMSE / MAE）
+    total_se = 0.0      
+    total_ae = 0.0      
+    total_ape = 0.0     
+    total_count = 0     
 
-    total_mape_count = 0  # 专门用于 MAPE（mask 后）
+    total_mape_count = 0
 
     # -------- per-step --------
     step_se = None
@@ -254,20 +251,17 @@ def test_model_new(model, dataloader, log=None):
             step_count = torch.zeros(T)
             step_mape_count = torch.zeros(T)
 
-        # -------- 误差 --------
         diff = pred - y
 
         se = diff ** 2
         ae = torch.abs(diff)
 
-        # -------- MAPE（带mask，关键！）--------
         abs_y = torch.abs(y)
         mask = abs_y > epsilon
 
         ape = torch.zeros_like(ae)
         ape[mask] = ae[mask] / abs_y[mask]
 
-        # -------- 累计（global）--------
         total_se += se.sum().item()
         total_ae += ae.sum().item()
         total_count += se.numel()
@@ -275,8 +269,6 @@ def test_model_new(model, dataloader, log=None):
         total_ape += ape.sum().item()
         total_mape_count += mask.sum().item()
 
-        # -------- 累计（per-step）--------
-        # (B, T, N) → (T,)
         step_se += se.sum(dim=(0, 2)).cpu()
         step_ae += ae.sum(dim=(0, 2)).cpu()
         step_count += torch.tensor(se.shape[0] * se.shape[2]).repeat(T)
@@ -323,22 +315,22 @@ if __name__ == "__main__":
 
     GPU_ID = args.gpu_num
     os.environ["CUDA_VISIBLE_DEVICES"] = f"{GPU_ID}"
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # 自动检测并使用 GPU
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu") 
 
     dataset = args.dataset
     dataset = dataset.upper()
     data_path = f"../data/{dataset}"
     model_name = LRPred.__name__
-    # 邻居矩阵
+
     transition_matrix, _ = load_adj(data_path + "/adj_mx.pkl", "doubletransition")
     transition_matrix = [torch.tensor(i) for i in transition_matrix]
-    with open(f"{model_name}.yaml", "r", encoding='utf-8') as f:   # 低秩模型这里有M3
+    with open(f"{model_name}.yaml", "r", encoding='utf-8') as f:  
         cfg = yaml.safe_load(f)
     cfg = cfg[dataset]
 
     # -------------------------------- load model -------------------------------- #
 
-    model = LRPred(transition_matrix=transition_matrix, **cfg["model_args"])    # PEMS有这个-->transition_matrix=transition_matrix   LA和BAY没有
+    model = LRPred(transition_matrix=transition_matrix, **cfg["model_args"]) 
     model = model.to(DEVICE)
 
     # ------------------------------- make log file ------------------------------ #
@@ -438,18 +430,9 @@ if __name__ == "__main__":
         log=log,
         save=save,
     )
-
-
-    # /data/zwf2020/Fastformer/saved_models/LRPred-PEMS08-2026-04-08-01-57-55.pt
-    # checkpoint_path = "/data/zwf2020/Fastformer/saved_models/LRPred-PEMS08-2026-04-08-01-57-55.pt"
-    # checkpoint = torch.load(checkpoint_path, map_location=torch.device('cpu'))  # 或相应设备
-    # model.load_state_dict(checkpoint)
-    # model.eval()
     
     print_log(f"Saved Model: {save}", log=log)
 
-    y_true, y_pred = test_model(model, testset_loader, log=log)  # 小数据集还是得用这个，大数据用test_model_new
+    y_true, y_pred = test_model(model, testset_loader, log=log) 
 
     log.close()
-    # np.savetxt("../vis/08PredLR.csv", y_pred[:, 11, :].T, delimiter=',')
-    # np.savetxt("../vis/08True.csv", y_true[:, 11, :].T, delimiter=',')
